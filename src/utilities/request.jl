@@ -123,6 +123,13 @@ function submit_request(aws::AbstractAWSConfig, request::Request; return_headers
 
     request.headers["User-Agent"] = user_agent[]
     request.headers["Host"] = HTTP.URI(request.url).host
+
+    # If there are no credentials, assume we should use the local file system
+    if !isdefined(AWSCredentials, :instance)
+        include("utilities/localS3.jl")
+        localS3.request(request, return_headers, aws_response)
+    end
+
     stream = @something request.response_stream IOBuffer()
 
     local aws_response
