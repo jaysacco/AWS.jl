@@ -34,6 +34,7 @@ include("AWSMetadata.jl")
 include("IMDS.jl")
 
 include(joinpath("utilities", "request.jl"))
+include(joinpath("utilities", "localS3.jl"))
 include(joinpath("utilities", "response.jl"))
 include(joinpath("utilities", "sign.jl"))
 include(joinpath("utilities", "downloads_backend.jl"))

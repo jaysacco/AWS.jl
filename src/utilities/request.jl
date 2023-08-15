@@ -124,13 +124,20 @@ function submit_request(aws::AbstractAWSConfig, request::Request; return_headers
     request.headers["User-Agent"] = user_agent[]
     request.headers["Host"] = HTTP.URI(request.url).host
 
-    # If there are no credentials, assume we should use the local file system
-    if !isdefined(AWSCredentials, :instance)
-        include("utilities/localS3.jl")
-        localS3.request(request, return_headers, aws_response)
-    end
-
     stream = @something request.response_stream IOBuffer()
+
+    # If there are no instantiated credentials, assume we should use the local file system
+    creds =  credentials(aws)
+    if creds.token == ""
+        try
+            return localS3.request(creds, request)
+        catch err
+            #e = HTTP.StatusError(err.status, err.request.method, err.request.target, err)
+            e = statuserror(err.status, err)
+            b = IOBuffer(err.body)  
+            throw(AWSException(e, b))
+        end
+    end
 
     local aws_response
     local response
