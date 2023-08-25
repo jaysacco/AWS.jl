@@ -12,52 +12,55 @@ Base.@kwdef mutable struct LocalS3Response
     body::String = ""
 end
 
-
 version = v"1.1.0"
 status = 200
 
-default_headers = Pair[
+"""
+To be added by _response function in this module
+"Date" => "TBD",
+"Content-Length" => "0",
+"""
+default_aws_response_headers = Pair[
     "x-amz-id-2" => "x-amz-id-2",
-    "x-amz-request-id" => "x-amz-request-id",
-    "x-amz-bucket-region" => "us-east-1",
-    "Content-Type" => "application/xml",
-    "Transfer-Encoding" => "chunked",
+    "x-amz-request-id" => "No ID For local S3",
     "Server" => "AmazonS3",
 ]
-
-body = """
-    <?xml version=\"1.0\" encoding=\"UTF-8\"?>\n
-    <ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">
-        <Name>sample-bucket</Name>
-        <Prefix></Prefix>
-        <Marker></Marker>
-        <MaxKeys>1000</MaxKeys>
-        <IsTruncated>false</IsTruncated>
-        <Contents>
-            <Key>test.txt</Key>
-            <LastModified>2020-06-16T21:37:34.000Z</LastModified>
-            <ETag>&quot;d41d8cd98f00b204e9800998ecf8427e&quot;</ETag>
-            <Size>0</Size>
-            <Owner>
-                <ID>id</ID>
-                <DisplayName>matt.brzezinski</DisplayName>
-            </Owner>
-            <StorageClass>STANDARD</StorageClass>
-        </Contents>
-    </ListBucketResult>
-    """
 
 function create_error_xml(error_code::String, error_msg::String, resource)
     body = """
     <?xml version="1.0" encoding="UTF-8"?>
-    <Error>
+    <Error xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">
     <Code>$(error_code)</Code>
     <Message>$(error_msg)</Message>
     <Resource>/$(resource)</Resource> 
-    <RequestId>4442587FB7D0A2F9</RequestId>
+    <RequestId>No ID For local S3</RequestId>
     </Error>
     """
     return(body)
+end
+
+"""
+    submit_request(aws::AbstractAWSConfig, request::Request; return_headers::Bool=false)
+
+Submit the request to AWS.
+
+# Arguments
+- `status`: The http status code e.g. 200, 400 etc.
+- `error_code`: AWS error code e.g. "BucketAlreadyOwnedByYou"
+- `error_msg`: AWS error message e.g. "The bucket that you tried to create already exists, and you own it."
+- `headers`: http headers e.g. Pair["x-amz-id-2" => "x-amz-id-2", "x-amz-request-id" => "x-amz-request-id"]
+- `method`: The http request method e.g. "PUT"
+- `resource`: The resource requesteg e.g. ""/CFI_Storage/users/jaysacco/newBucket"
+
+# Returns
+- `AWS.statuserror`
+"""
+#function create_AWSException(status::Integer, error_code::String, error_msg::String, headers, method::String, resource::String)
+function create_AWSException(status , error_code, error_msg, headers, method, resource)
+    body = create_error_xml(error_code, error_msg, resource)
+    rqst = HTTP.Request(method, resource, headers, body)
+    resp =  HTTP.Response(status, headers, body, request = rqst)
+    return AWS.statuserror(status, resp)
 end
 
 # Override AWS S3 requests to use the local file system instead of S3
@@ -81,7 +84,8 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
     status = 200
     error_code = ""
     error_msg = ""
-    headers = default_headers
+    headers = default_aws_response_headers
+    body = ""
 
     if method == "PUT" && startswith(query_parms, "CreateBucketConfiguration")
         # Create bucket https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html
@@ -100,11 +104,8 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
                 status = 409
             end
             # Return error
-            body = Vector{UInt8}(create_error_xml(error_code, error_msg, resource))
-            rqst = HTTP.Request(method, resource, headers, body)
-            resp =  HTTP.Messages.Response(status, headers, body, request = rqst)
-            #e = HTTP.StatusError(status, method, resource, resp)
-            throw(resp)
+            ex = create_AWSException(status, error_code, error_msg, headers, method, resource)
+            throw(ex)
         else
             try
                 mkpath(resource)
@@ -114,32 +115,44 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
                 error_code = "InvalidBucketName"
                 error_msg = "The specified bucket is not valid."
                 status = 409
-                body = create_error_xml(error_code, error_msg, resource)
-                throw(body)
+                ex = create_AWSException(status, error_code, error_msg, headers, method, resource)
+                throw(ex)
             end
         end
     end
-    _response(status = status, headers = headers, body = body)
+    println("Sending response")
+    return _response(status = status, headers = headers, body = body)
 end
 
+"""
+    _response(;
+    version::VersionNumber=version,
+    status::Int64=status,
+    headers::Array=default_headers, Must not include Date or Content_Length
+    body::String=body,
+)
+
+Creates an HTTP.Messages.Response based on the input parameters and addes the header Date and Content_Length values
+Returns an HTTP.Messages.Response
+"""
 function _response(;
     version::VersionNumber=version,
     status::Int64=status,
-    headers::Array=default_headers,
+    headers::Array=default_aws_response_headers,
     body::String=body,
 )
-    # Add the current date in GMT to the headers
-    push!(headers, "Dates" => Dates.format(Dates.now(UTC), RFC1123Format) * " GMT" )
     response = HTTP.Messages.Response()
     response.version = version
     response.status = status
+    content_length = 0
+    if !isempty(body)
+        content_length = length(body)
+        response.body = IOBuffer(body)
+    end
+    push!(headers, "Content_Length" => string(content_length))
+    push!(headers, "Date" => Dates.format(Dates.now(UTC), RFC1123Format) * " GMT" )
     response.headers = headers
-    response.body = b"[Message Body was streamed]"
-
-    b = IOBuffer(body)
-
-    return AWS.Response(response, b)
+    return(response)
 end
-
 
 end # module localS3

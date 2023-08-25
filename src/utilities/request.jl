@@ -126,16 +126,19 @@ function submit_request(aws::AbstractAWSConfig, request::Request; return_headers
 
     stream = @something request.response_stream IOBuffer()
 
-    # If there are no instantiated credentials, assume we should use the local file system
+    # localS3: If there are no instantiated credentials, assume we should use the local file system
     creds =  credentials(aws)
     if creds.token == ""
         try
-            return localS3.request(creds, request)
-        catch err
-            #e = HTTP.StatusError(err.status, err.request.method, err.request.target, err)
-            e = statuserror(err.status, err)
-            b = IOBuffer(err.body)  
-            throw(AWSException(e, b))
+            httpResp = localS3.request(creds, request)
+            buffer = Base.BufferStream()
+            write(buffer, httpResp.body)
+            closewrite(buffer)
+            write(stream, buffer)
+            return Response(httpResp, stream)
+        catch e # e must be HTTP.Exceptions.StatusError
+            err = AWSException(e)
+            throw(err)
         end
     end
 
