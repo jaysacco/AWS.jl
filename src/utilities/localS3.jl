@@ -111,7 +111,7 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
                 mkpath(resource)
                 push!(headers, "Location" => "/" * resource)
             catch err
-                # If not successful
+                # If the file system couldn't create the directory, assume it's a problem with the bucket's path/name (e.g. not lack of disk space)
                 error_code = "InvalidBucketName"
                 error_msg = "The specified bucket is not valid."
                 status = 409

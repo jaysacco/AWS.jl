@@ -131,10 +131,7 @@ function submit_request(aws::AbstractAWSConfig, request::Request; return_headers
     if creds.token == ""
         try
             httpResp = localS3.request(creds, request)
-            buffer = Base.BufferStream()
-            write(buffer, httpResp.body)
-            closewrite(buffer)
-            write(stream, buffer)
+            write(stream, httpResp.body)
             return Response(httpResp, stream)
         catch e # e must be HTTP.Exceptions.StatusError
             err = AWSException(e)
