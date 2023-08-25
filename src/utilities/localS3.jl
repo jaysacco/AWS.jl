@@ -2,16 +2,6 @@ module localS3
 
 using AWS, HTTP, Dates
 
-Base.@kwdef mutable struct LocalS3Request
-    method::String = ""
-    target::String = ""
-end
-
-Base.@kwdef mutable struct LocalS3Response
-    request::LocalS3Request = LocalS3Request()
-    body::String = ""
-end
-
 version = v"1.1.0"
 status = 200
 
