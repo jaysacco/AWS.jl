@@ -74,44 +74,114 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
     status = 200
     error_code = ""
     error_msg = ""
-    headers = default_aws_response_headers
+    response_headers = default_aws_response_headers
     body = ""
+    content_type = "text/html" # If non specified, treat as text
+    # S3 resources come in the form of <bucket>/s3://<fully qualified path to data key> e.g. 
+    # "TestBucket/s3://C:/Users/jaysa/Documents/git/cfi/CFI_Storage/jaysacco/TestBucket/datakey1"
+    s3_resource = split(resource, "s3://")
 
-    if method == "PUT" && startswith(query_parms, "CreateBucketConfiguration")
-        # Create bucket https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html
-        # resource is the name of the directory to create, assume it starts with a / character
-        # Make sure the bucket doesn't already exist, bucket names must be globally unique even between user accounts
-        if ispath(resource)
-            # Bucket already exists
-            # If user owns the bucket
-            if occursin(user, resource)
-                error_code = "BucketAlreadyOwnedByYou"
-                error_msg = "The bucket that you tried to create already exists, and you own it."
-                status = 400
-            else
-                error_code = "BucketAlreadyExists"
-                error_msg = "The requested bucket name is not available. The bucket namespace is shared by all users of the system. Specify a different name and try again."
-                status = 409
-            end
-            # Return error
-            ex = create_AWSException(status, error_code, error_msg, headers, method, resource)
-            throw(ex)
-        else
-            try
-                mkpath(resource)
-                push!(headers, "Location" => "/" * resource)
-            catch err
-                # If the file system couldn't create the directory, assume it's a problem with the bucket's path/name (e.g. not lack of disk space)
-                error_code = "InvalidBucketName"
-                error_msg = "The specified bucket is not valid."
-                status = 409
-                ex = create_AWSException(status, error_code, error_msg, headers, method, resource)
+    if method == "PUT"
+        #
+        # Create Bucket
+        #
+        if startswith(query_parms, "CreateBucketConfiguration")
+            # Create bucket https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucket.html
+            # resource is the name of the directory to create, assume it starts with a / character
+            # Make sure the bucket doesn't already exist, bucket names must be globally unique even between user accounts
+            if ispath(resource)
+                # Bucket already exists
+                # If user owns the bucket
+                if occursin(user, resource)
+                    error_code = "BucketAlreadyOwnedByYou"
+                    error_msg = "The bucket that you tried to create already exists, and you own it."
+                    status = 400
+                else
+                    error_code = "BucketAlreadyExists"
+                    error_msg = "The requested bucket name is not available. The bucket namespace is shared by all users of the system. Specify a different name and try again."
+                    status = 409
+                end
+                # Return error
+                ex = create_AWSException(status, error_code, error_msg, response_headers, method, resource)
                 throw(ex)
+            else
+                try
+                    mkpath(resource)
+                    push!(response_headers, "Location" => "/" * resource)
+                catch err
+                    # If the file system couldn't create the directory, assume it's a problem with the bucket's path/name (e.g. not lack of disk space)
+                    error_code = "InvalidBucketName"
+                    error_msg = "The specified bucket is not valid."
+                    status = 409
+                    ex = create_AWSException(status, error_code, error_msg, response_headers, method, resource)
+                    throw(ex)
+                end
             end
-        end
-    end
+        # End create bucket
+        #
+        # put object
+        #
+        elseif length(s3_resource) > 1
+            # Process put object request
+            fq_data_key = last(s3_resource)
+            # Override default content type established above if specified in request headers
+            if haskey(request.headers,"Content-Type")
+                content_type = request.headers["Content-Type"]
+            end
+            # Put content type in the metadata and add any other metadata from the request headers
+            metadata = ["content-type" => content_type]
+            for md in request.headers
+                split_md = split(md[1], "x-amz-meta-")
+                if length(split_md) > 1
+                    append!(metadata, [split_md[2] => md[2]])
+                end
+            end  
+            # TBD DW: write object data to disk using high performance technique
+            open(fq_data_key, "w") do file
+                write(file, request.content)
+            end
+            # TBD DW: Write metadata to disk using high performance technique
+            open(fq_data_key * ".metadata", "w") do file
+                write(file, string(metadata))
+            end
+        end  # Put object
+
+    elseif method == "GET"
+        #
+        # get object
+        #
+        if length(s3_resource) > 1
+            # Process get object request
+            fq_data_key = last(s3_resource)
+            # Read metadata first to get the content-type of the object
+            # TBD DW: read metadata from disk using high performance technique
+            io = open(fq_data_key * ".metadata", "r")
+            meta_data = read(io, String)
+            close(io)
+            # Convert meta_data to a dictionary and get content_type
+            metadata = eval(Meta.parse(meta_data))
+            for p in metadata
+                if p[1] == "Content-Type"
+                    content_type = p[2]
+                    break
+                end
+            end  
+            io_type = String # Default IO type
+            if startswith(content_type, "text")
+                io_type = String
+            end
+            # TBD DW: read data from disk using high performance technique
+            io = open(fq_data_key, "r")
+            object_data = read(io, io_type)
+            close(io)
+            # Add metadata to response headers
+            append!(response_headers, metadata)
+            body = object_data
+        end # get object
+
+    end # method == xx
     println("Sending response")
-    return _response(status = status, headers = headers, body = body)
+    return _response(status = status, headers = response_headers, body = body)
 end
 
 """

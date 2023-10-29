@@ -134,8 +134,12 @@ function submit_request(aws::AbstractAWSConfig, request::Request; return_headers
             write(stream, httpResp.body)
             return Response(httpResp, stream)
         catch e # e must be HTTP.Exceptions.StatusError
-            err = AWSException(e)
-            throw(err)
+            if e  isa HTTP.Exceptions.StatusError
+                err = AWSException(e)
+                throw(err)
+            else
+                rethrow()
+            end
         end
     end
 
