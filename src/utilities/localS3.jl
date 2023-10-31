@@ -122,7 +122,6 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
         # put object
         #
         elseif length(s3_resource) > 1
-            # Process put object request
             fq_data_key = last(s3_resource)
             # Override default content type established above if specified in request headers
             if haskey(request.headers,"Content-Type")
@@ -136,11 +135,9 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
                     append!(metadata, [split_md[2] => md[2]])
                 end
             end  
-            # TBD DW: write object data to disk using high performance technique
             open(fq_data_key, "w") do file
                 write(file, request.content)
             end
-            # TBD DW: Write metadata to disk using high performance technique
             open(fq_data_key * ".metadata", "w") do file
                 write(file, string(metadata))
             end
@@ -151,14 +148,12 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
         # get object
         #
         if length(s3_resource) > 1
-            # Process get object request
             fq_data_key = last(s3_resource)
             # Read metadata first to get the content-type of the object
-            # TBD DW: read metadata from disk using high performance technique
             io = open(fq_data_key * ".metadata", "r")
             meta_data = read(io, String)
             close(io)
-            # Convert meta_data to a dictionary and get content_type
+            # Convert meta_data to array of pairs and get content_type
             metadata = eval(Meta.parse(meta_data))
             for p in metadata
                 if p[1] == "Content-Type"
@@ -170,7 +165,6 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
             if startswith(content_type, "text")
                 io_type = String
             end
-            # TBD DW: read data from disk using high performance technique
             io = open(fq_data_key, "r")
             object_data = read(io, io_type)
             close(io)
@@ -178,7 +172,20 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
             append!(response_headers, metadata)
             body = object_data
         end # get object
-
+    elseif method == "HEAD"
+        #
+        # get_meta data
+        #
+        if length(s3_resource) > 1
+            fq_data_key = last(s3_resource)
+            io = open(fq_data_key * ".metadata", "r")
+            meta_data = read(io, String)
+            close(io)
+            # Convert meta_data to array of pairs
+            metadata = eval(Meta.parse(meta_data))
+            # Add metadata to response headers
+            append!(response_headers, metadata)
+        end # get_meta data
     end # method == xx
     println("Sending response")
     return _response(status = status, headers = response_headers, body = body)
