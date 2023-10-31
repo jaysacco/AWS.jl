@@ -186,8 +186,20 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
             # Add metadata to response headers
             append!(response_headers, metadata)
         end # get_meta data
+    elseif method == "DELETE"
+        #
+        # delete object.  If the object is a directory, all directory contents are deleted as well.
+        # if the object doesn't exist, doesn't return error
+        #
+        if length(s3_resource) > 1
+            fq_data_key = last(s3_resource)
+            fq_metadata_key = fq_data_key * ".metadata"
+            rm(fq_data_key, force=true, recursive=true)
+            rm(fq_metadata_key, force=true, recursive=true)
+            status = 204
+        end # delete object
     end # method == xx
-    println("Sending response")
+    println("Sending $status response")
     return _response(status = status, headers = response_headers, body = body)
 end
 
