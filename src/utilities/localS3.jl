@@ -197,6 +197,23 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
             rm(fq_data_key, force=true, recursive=true)
             rm(fq_metadata_key, force=true, recursive=true)
             status = 204
+            # End delete object
+        #
+        # delete bucket.  The bucket must be a directory and must be empty to be deleted.
+        #
+        elseif length(s3_resource) == 1
+            s3_resource = s3_resource[1]
+            # Extract the fully qualified path to bucket
+            last_colon_i = findlast(":", s3_resource)[1]
+            fq_bucket = chop(s3_resource, head = last_colon_i - 2, tail = 0)
+            # If bucket a directory and the directory is empty
+            if isdir(fq_bucket) && length(readdir(fq_bucket)) == 0
+                    rm(fq_bucket)
+                    status = 204
+            else
+                # Unsuccesful, at least one precondition failed
+                status = 412
+            end
         end # delete object
     end # method == xx
     println("Sending $status response")
