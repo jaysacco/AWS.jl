@@ -47,6 +47,7 @@ Submit the request to AWS.
 """
 #function create_AWSException(status::Integer, error_code::String, error_msg::String, headers, method::String, resource::String)
 function create_AWSException(status , error_code, error_msg, headers, method, resource)
+    push!(headers, "Date" => Dates.format(Dates.now(UTC), RFC1123Format) * " GMT" )
     body = create_error_xml(error_code, error_msg, resource)
     rqst = HTTP.Request(method, resource, headers, body)
     resp =  HTTP.Response(status, headers, body, request = rqst)
@@ -123,6 +124,17 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
         #
         elseif length(s3_resource) > 1
             fq_data_key = last(s3_resource)
+            bucket_name = first(s3_resource)
+            # Fully qualify the bucket name
+            fq_bucket_name = first(fq_data_key, findfirst(bucket_name, fq_data_key)[end])
+            # If the bucket doesn't exist
+            if !isdir(fq_bucket_name)
+                error_code = "NoSuchBucket"
+                error_msg = "The specified bucket does not exist."
+                status = 404
+                ex = create_AWSException(status, error_code, error_msg, response_headers, method, resource)
+                throw(ex)
+            end
             # Override default content type established above if specified in request headers
             if haskey(request.headers,"Content-Type")
                 content_type = request.headers["Content-Type"]
@@ -206,13 +218,24 @@ function request(creds::AWS.AWSCredentials, request::AWS.Request)
             # Extract the fully qualified path to bucket
             last_colon_i = findlast(":", s3_resource)[1]
             fq_bucket = chop(s3_resource, head = last_colon_i - 2, tail = 0)
-            # If bucket a directory and the directory is empty
-            if isdir(fq_bucket) && length(readdir(fq_bucket)) == 0
-                    rm(fq_bucket)
-                    status = 204
+            # If bucket is not a directory
+            if !isdir(fq_bucket)
+                error_code = "NoSuchBucket"
+                error_msg = "The specified bucket does not exist."
+                status = 404
+                ex = create_AWSException(status, error_code, error_msg, response_headers, method, resource)
+                throw(ex)
+            # If bucket isn't empty
+            elseif length(readdir(fq_bucket)) != 0
+                error_code = "BucketNotEmpty"
+                error_msg = "The bucket that you tried to delete is not empty."
+                status = 409
+                ex = create_AWSException(status, error_code, error_msg, response_headers, method, resource)
+                throw(ex)
             else
-                # Unsuccesful, at least one precondition failed
-                status = 412
+                # Delete bucket
+                rm(fq_bucket)
+                status = 204
             end
         end # delete object
     end # method == xx
